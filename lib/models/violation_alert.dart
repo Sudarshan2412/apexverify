@@ -1,18 +1,26 @@
+import 'dart:typed_data';
+
 class ViolationAlert {
-  final String severity; // e.g., "HIGH RISK", "MEDIUM", "LOW"
-  final String description; // Gemini-generated description
+  final String severity;       // "HIGH_RISK" or "LOW_RISK"
+  final String description;    // Gemini Flash plain-English description
+  final String fieldMismatch;  // which field was wrong: "score", "clock", "overlay"
+  final String expected;       // value from Firestore
+  final String actual;         // value from OCR
   final DateTime timestamp;
-  final String fieldMismatch; // Which field was wrong (e.g., "score", "clock")
+  final Uint8List? frameBytes; // frame that triggered it (for DMCA screenshot)
 
   const ViolationAlert({
     required this.severity,
     required this.description,
-    required this.timestamp,
     required this.fieldMismatch,
+    required this.expected,
+    required this.actual,
+    required this.timestamp,
+    this.frameBytes,
   });
 
   @override
   String toString() {
-    return 'ViolationAlert(severity: $severity, description: $description, timestamp: $timestamp, fieldMismatch: $fieldMismatch)';
+    return 'ViolationAlert(severity: $severity, fieldMismatch: $fieldMismatch, expected: $expected, actual: $actual, timestamp: $timestamp)';
   }
 }

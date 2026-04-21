@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import '../models/match_snapshot.dart';
 import '../models/violation_alert.dart';
@@ -8,7 +9,7 @@ import 'firestore_service.dart';
 
 class ComparisonService {
   final FirestoreService _firestoreService;
-  final String geminiApiKey = 'AIzaSyCQSyLrDgOdzMsetp7jc1Qtu5z8UM_d6wo';
+  final String geminiApiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
 
   final StreamController<ViolationAlert?> _alertController =
       StreamController<ViolationAlert?>.broadcast();
@@ -23,17 +24,17 @@ class ComparisonService {
     if (ocr.score.isNotEmpty && ocr.score != official['score']) {
       _alertController.add(await _buildAlert(
         fieldMismatch: 'score',
-        expected: official['score'],
+        expected: official['score'] ?? '',
         actual: ocr.score,
       ));
       return;
     }
 
     if (ocr.clock.isNotEmpty &&
-        _clockDriftExceedsThreshold(ocr.clock, official['clock'])) {
+        _clockDriftExceedsThreshold(ocr.clock, official['clock'] ?? '')) {
       _alertController.add(await _buildAlert(
         fieldMismatch: 'clock',
-        expected: official['clock'],
+        expected: official['clock'] ?? '',
         actual: ocr.clock,
       ));
       return;
@@ -52,9 +53,24 @@ class ComparisonService {
   }
 
   bool _clockDriftExceedsThreshold(String ocr, String official) {
-    final ocrMin = int.tryParse(ocr.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-    final offMin = int.tryParse(official.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-    return (ocrMin - offMin).abs() > 2;
+    return (_parseClockToSeconds(ocr) - _parseClockToSeconds(official)).abs() > 60;
+  }
+
+  /// Converts a clock string to total seconds.
+  /// Handles: "67'" → 4020s, "67:30" → 4050s, "49.8" → 50s
+  int _parseClockToSeconds(String clock) {
+    // Format: "67'" or "90+3'" (football)
+    final prime = RegExp(r"(\d+)(?:\+\d+)?'").firstMatch(clock);
+    if (prime != null) return int.parse(prime.group(1)!) * 60;
+    // Format: "67:30" or "12:45" (MM:SS)
+    final colon = RegExp(r'(\d+):(\d{2})').firstMatch(clock);
+    if (colon != null) {
+      return int.parse(colon.group(1)!) * 60 + int.parse(colon.group(2)!);
+    }
+    // Format: "49.8" (basketball quarter-clock in seconds)
+    final decimal = double.tryParse(clock);
+    if (decimal != null) return decimal.round();
+    return 0;
   }
 
   Future<ViolationAlert> _buildAlert({
@@ -93,24 +109,32 @@ Value found in stream: $actual
 In one sentence, describe this as a forensic finding for a DMCA report. Be specific and professional.
 ''';
 
-    final response = await http.post(
-      Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$geminiApiKey',
-      ),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'contents': [
-          {
-            'parts': [
-              {'text': prompt}
-            ]
-          }
-        ]
-      }),
-    );
+    try {
+      final response = await http.post(
+        Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$geminiApiKey',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {'text': prompt}
+              ]
+            }
+          ]
+        }),
+      );
 
-    final json = jsonDecode(response.body);
-    return json['candidates'][0]['content']['parts'][0]['text'] ??
-        'Violation detected.';
+      final json = jsonDecode(response.body);
+      return json['candidates'][0]['content']['parts'][0]['text'] ??
+          'Violation detected.';
+    } catch (_) {
+      return 'Violation detected: $fieldMismatch mismatch (expected: $expected, actual: $actual).';
+    }
+  }
+
+  void dispose() {
+    _alertController.close();
   }
 }

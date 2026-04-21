@@ -1,7 +1,7 @@
 # Lessons
 
 - Use `plan.md` workflow first: write the implementation checklist before coding.
-- Keep all implementation and tracking updates inside the active repo folder (`fair_scan_ai`) so commits are push-ready.
+- Keep tracker files in sync across both locations: update root `tasks/*` and `fair_scan_ai/tasks/*` together unless the user explicitly requests otherwise.
 - For OCR parsing, avoid clock/score collisions by resolving `clock` first and excluding it from score candidates.
 - If Flutter test load fails with "Does not exist", verify test path typos first (e.g., `ocr_service_test.dart` vs `ocr_seervice_test.dart`).
 - Keep parser tests focused on extraction behavior (score, clock, overlay) so regex tuning is safe and fast.
@@ -18,4 +18,5 @@
 - Treat `plan.md` as mandatory operating workflow for all non-trivial work, including verification and re-planning.
 - Keep `tasks/todo.md` current as the live execution checklist; update it before coding and while coding.
 - After every user correction or process reminder, immediately record the prevention rule in this file before proceeding.
+- For every non-trivial update, mirror changes in both `tasks/todo.md` files and both `tasks/lessons.md` files in the same turn.
 - Keep all file operations strictly inside workspace project folders (root and `fair_scan_ai`); treat VS Code chat session artifacts under AppData as read-only diagnostics, never as project files.

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'core/theme/app_theme.dart';
+import 'firebase_options.dart';
 import 'login_page.dart';
 import 'stream_monitor_screen.dart';
 
@@ -14,6 +16,15 @@ Future<void> main() async {
   } catch (_) {
     // .env file not found - this is okay for development
     // The app will work with default/hardcoded values
+  }
+
+  // Initialize Firebase
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint('[App] Firebase init error: $e');
   }
 
   runApp(const RightsGuardApp());

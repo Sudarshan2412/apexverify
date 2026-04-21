@@ -27,6 +27,15 @@ class OcrService {
   final String _cloudVisionApiKey;
   final bool _enableDebugLogs;
 
+  // ── Live pipeline state ──────────────────────────────────────
+  StreamSubscription<Uint8List>? _liveFrameSub;
+  final StreamController<MatchSnapshot> _snapshotController =
+      StreamController<MatchSnapshot>.broadcast();
+
+  /// The stream Member D subscribes to.
+  /// Emits one [MatchSnapshot] per frame processed from the live pipeline.
+  Stream<MatchSnapshot> get snapshotStream => _snapshotController.stream;
+
   Future<MatchSnapshot> processFrame(Uint8List frameBytes) async {
     final mlKitText = await _runMlKit(frameBytes);
 
@@ -177,6 +186,8 @@ class OcrService {
   }
 
   Future<void> dispose() async {
+    stopLivePipeline();
+    await _snapshotController.close();
     try {
       await _textRecognizer.close();
     } on MissingPluginException {
@@ -185,6 +196,57 @@ class OcrService {
     if (_ownsHttpClient) {
       _httpClient.close();
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // LIVE PIPELINE — Member C Phase 3
+  // ─────────────────────────────────────────────────────────────
+
+  /// Starts the live OCR pipeline by subscribing to [frameStream].
+  ///
+  /// **How to use right now (mock, no Member B needed):**
+  /// ```dart
+  /// final sampler = RealMockFrameSampler();
+  /// ocrService.startLivePipeline(sampler.startSampling(''));
+  /// ```
+  ///
+  /// **When Member B is ready — one-line swap:**
+  /// ```dart
+  /// final sampler = FrameSampler(); // Member B's real frame grabber
+  /// ocrService.startLivePipeline(sampler.startSampling(liveUrl));
+  /// ```
+  ///
+  /// Member D subscribes to the output:
+  /// ```dart
+  /// ocrService.snapshotStream.listen(comparisonService.compare);
+  /// ```
+  void startLivePipeline(Stream<Uint8List> frameStream) {
+    _liveFrameSub?.cancel();
+    _liveFrameSub = frameStream.listen((frameBytes) async {
+      final sw = Stopwatch()..start();
+      try {
+        final snapshot = await processFrame(frameBytes);
+        sw.stop();
+        final ms = sw.elapsedMilliseconds;
+        _debug('Frame processed in ${ms}ms → $snapshot');
+        if (ms > 5000) {
+          _debug('⚠️ LATENCY WARNING: ${ms}ms exceeds 5000ms budget');
+        }
+        _snapshotController.add(snapshot);
+      } catch (e) {
+        sw.stop();
+        _debug('Frame processing error (${sw.elapsedMilliseconds}ms): $e');
+      }
+    });
+    _debug('Live pipeline started.');
+  }
+
+  /// Stops the live pipeline and cancels the frame subscription.
+  /// Called automatically by [dispose].
+  void stopLivePipeline() {
+    _liveFrameSub?.cancel();
+    _liveFrameSub = null;
+    _debug('Live pipeline stopped.');
   }
 
   Future<String> _runMlKit(Uint8List frameBytes) async {

@@ -17,6 +17,7 @@
 - [ ] Mark progress during execution, not only at the end.
 - [ ] Do not mark work complete until verification evidence is logged.
 - [ ] After any user correction, add a prevention rule to `tasks/lessons.md`.
+- [ ] Mirror tracker updates in both `tasks/*` and `fair_scan_ai/tasks/*` in the same turn.
 
 ## Remaining Part 1 Tasks
 - [x] Run `flutter test test/ocr_service_test.dart` to verify parser fixes (dash, space-separated, TEAM SCORE TEAM SCORE patterns work)
@@ -24,6 +25,9 @@
 - [x] Confirm no regressions in OCR logic
 - [x] Verify decimal clock format (49.8) parsing works
 - [x] Record final static-image validation results for handoff readiness
+- [x] Isolate Member C work and coordination requirements in `integration.md`
+- [x] Identify Member C remaining work and coordination gaps in `instructions.md`
+- [x] Consolidate `integration.md` into deduplicated `instructions.md`, delete `integration.md`, and add `instructions.md` to `.gitignore`
 
 ## Review Notes (Part 1 Parser Debugging)
 - Raw OCR from epl_01.png: "MCI HESTER 0 89:10 0 TOT HE WORLD'S GAME FC24 MANCHE THE WORLD'S" - Score was "0 0", clock "89:10". Parser found "89:10" as score (wrong). Fixed by removing `:` from dash-score regex (only `-` now).
@@ -46,3 +50,4 @@
 	- `epl_02.png` -> `ARS vs WOL`, score `0 - 0`, clock `24:35`
 	- `nba_01.png` -> `GS vs CLE`, score `64 - 85`, clock `49.8`
 	- `ucl_01.png` -> `RMA vs BAY`, score `2 - 1`, clock `90:00`
+- `flutter run -d windows -t tool/ocr_static_check.dart` -> Cloud Vision escalation now succeeds with HTTP 200 and fullTextAnnotation across all static images; parsed snapshots confirmed for EPL/NBA/UCL samples
