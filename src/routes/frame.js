@@ -1,0 +1,190 @@
+const express = require('express');
+const { spawn } = require('child_process');
+
+const router = express.Router();
+
+const RESOLVE_TTL_MS = 5 * 60 * 1000;
+const _resolvedCache = new Map();
+
+function _isDirectStreamUrl(url) {
+  return url.includes('.m3u8') || url.includes('.ts') || url.includes('manifest');
+}
+
+function _cacheGet(url) {
+  const entry = _resolvedCache.get(url);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    _resolvedCache.delete(url);
+    return null;
+  }
+  return entry.value;
+}
+
+function _cacheSet(url, value) {
+  _resolvedCache.set(url, { value, expiresAt: Date.now() + RESOLVE_TTL_MS });
+}
+
+function _runWithTimeout(command, args, { timeoutMs = 15000, binaryStdout = false } = {}) {
+  return new Promise((resolve) => {
+    let stdout = binaryStdout ? [] : '';
+    let stderr = '';
+    let timedOut = false;
+
+    const child = spawn(command, args, {
+      shell: true,
+      windowsHide: true,
+    });
+
+    async function killTree() {
+      try {
+        if (process.platform === 'win32') {
+          // Kill the whole tree so ffmpeg doesn't survive the shell.
+          spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+            shell: true,
+            windowsHide: true,
+          });
+        } else {
+          child.kill('SIGKILL');
+        }
+      } catch (_) {
+        try {
+          child.kill();
+        } catch (_) {
+          // ignore
+        }
+      }
+    }
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killTree();
+    }, timeoutMs);
+
+    if (binaryStdout) {
+      child.stdout.on('data', (chunk) => stdout.push(chunk));
+    } else {
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => (stdout += chunk));
+    }
+
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({
+        code: typeof code === 'number' ? code : -1,
+        stdout: binaryStdout ? Buffer.concat(stdout) : stdout,
+        stderr,
+        timedOut,
+      });
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ code: -1, stdout: binaryStdout ? Buffer.alloc(0) : '', stderr: String(err), timedOut });
+    });
+  });
+}
+
+async function _resolveStreamUrl(inputUrl) {
+  if (_isDirectStreamUrl(inputUrl)) return inputUrl;
+
+  const cached = _cacheGet(inputUrl);
+  if (cached) return cached;
+
+  // Prefer `yt-plb` if installed (requested). Fall back to `yt-dlp`.
+  const candidates = ['yt-plb', 'yt-dlp'];
+
+  for (const exe of candidates) {
+    const res = await _runWithTimeout(
+      exe,
+      ['-g', '--no-playlist', '-f', 'best[ext=mp4]', inputUrl],
+      { timeoutMs: 15000, binaryStdout: false },
+    );
+
+    if (res.code === 0) {
+      const resolved = String(res.stdout || '').trim();
+      if (resolved) {
+        _cacheSet(inputUrl, resolved);
+        return resolved;
+      }
+    }
+  }
+
+  return null;
+}
+
+router.get('/frame', async (req, res) => {
+  const url = (req.query.url || '').toString().trim();
+  if (!url) {
+    return res.status(400).send('Missing required query param: url');
+  }
+
+  const tRaw = (req.query.t || '').toString().trim();
+  const t = Number.isFinite(Number(tRaw)) ? Math.max(0, Math.floor(Number(tRaw))) : 0;
+
+  try {
+    const streamUrl = await _resolveStreamUrl(url);
+    if (!streamUrl) {
+      return res.status(502).send('Failed to resolve stream URL (yt-plb/yt-dlp).');
+    }
+
+    const isHls = streamUrl.includes('.m3u8') || streamUrl.includes('manifest');
+    const canSeek = t > 0;
+
+    const baseArgs = [
+      '-y',
+      '-nostdin',
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-rw_timeout', '15000000', // 15s (microseconds)
+      ...(isHls ? ['-live_start_index', '-1'] : []),
+    ];
+
+    const argsWithSeek = [
+      ...baseArgs,
+      ...(canSeek ? ['-ss', String(t)] : []),
+      '-i', streamUrl,
+      '-vframes', '1',
+      '-f', 'image2pipe',
+      '-vcodec', 'png',
+      'pipe:1',
+    ];
+
+    let ff = await _runWithTimeout('ffmpeg', argsWithSeek, { timeoutMs: 15000, binaryStdout: true });
+
+    // If seeking isn't supported for this URL type, retry once without -ss.
+    if ((ff.timedOut || ff.code !== 0 || !ff.stdout || ff.stdout.length === 0) && canSeek) {
+      const argsNoSeek = [
+        ...baseArgs,
+        '-i', streamUrl,
+        '-vframes', '1',
+        '-f', 'image2pipe',
+        '-vcodec', 'png',
+        'pipe:1',
+      ];
+      ff = await _runWithTimeout('ffmpeg', argsNoSeek, { timeoutMs: 15000, binaryStdout: true });
+    }
+
+    if (ff.timedOut) {
+      // Most common cause: expired / stalled stream URL.
+      _resolvedCache.delete(url);
+      return res.status(504).send('ffmpeg timed out while grabbing a frame');
+    }
+
+    if (ff.code !== 0 || !ff.stdout || ff.stdout.length === 0) {
+      // If the stream URL expired, clear cache so next request re-resolves.
+      _resolvedCache.delete(url);
+      return res.status(502).send(ff.stderr || 'ffmpeg failed to produce frame output');
+    }
+
+    res.setHeader('Content-Type', 'image/png');
+    return res.status(200).send(ff.stdout);
+  } catch (err) {
+    _resolvedCache.delete(url);
+    return res.status(500).send(String(err));
+  }
+});
+
+module.exports = router;

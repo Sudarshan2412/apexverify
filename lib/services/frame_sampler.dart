@@ -209,8 +209,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image/image.dart' as img;
+
+import 'base_frame_sampler.dart';
 
 // ─────────────────────────────────────────────────────────────
 // ABSTRACT INTERFACE
@@ -218,16 +221,7 @@ import 'package:image/image.dart' as img;
 // Member A depends on this interface — swapping mock for real
 // is a one-line change in the provider.
 // ─────────────────────────────────────────────────────────────
-abstract class BaseFrameSampler {
-  /// Returns a stream of preprocessed PNG frames (grayscale + contrast).
-  Stream<Uint8List> startSampling(String url);
-
-  /// Saves the last emitted frame to disk. Member A calls this
-  /// when the screenshot button is pressed.
-  Future<void> saveCurrentFrame(String outputPath);
-
-  void dispose();
-}
+// BaseFrameSampler moved to `base_frame_sampler.dart` (web-safe).
 
 // ─────────────────────────────────────────────────────────────
 // REAL MOCK — loads actual scoreboard PNGs from assets,
@@ -335,9 +329,17 @@ class FrameSampler implements BaseFrameSampler {
   StreamController<Uint8List>? _controller;
   Uint8List? _lastFrame;
 
+  bool _grabInFlight = false;
+  static const Duration _processTimeout = Duration(seconds: 12);
+
   /// Cached resolved stream URL. yt-dlp is called only once per
   /// startSampling() call — not on every 5-second tick.
   String? _resolvedStreamUrl;
+
+  /// For non-HLS sources (VOD/direct MP4), repeated ffmpeg invocations will
+  /// otherwise decode timestamp 0 every time. We advance a simple seek offset
+  /// so each tick grabs a later moment in the video.
+  int _vodSeekSeconds = 0;
 
   FrameSampler({
     Duration interval = const Duration(seconds: 5),
@@ -349,11 +351,15 @@ class FrameSampler implements BaseFrameSampler {
     _controller?.close();
     _controller = StreamController<Uint8List>.broadcast();
     _resolvedStreamUrl = null; // clear cache so new URL resolves fresh
+    _vodSeekSeconds = 0;
 
-    _timer?.cancel();
-    _timer = Timer.periodic(_interval, (_) async {
+    Future<void> tick() async {
+      if (_grabInFlight) return;
+      _grabInFlight = true;
       try {
-        final raw = await _grabFrame(url);
+        final raw = await _grabFrame(url, vodSeekSeconds: _vodSeekSeconds);
+        // Advance seek for next tick (non-HLS only; ignored for HLS).
+        _vodSeekSeconds += _interval.inSeconds;
         if (raw != null) {
           final processed = _preprocess(raw);
           _lastFrame = processed;
@@ -361,8 +367,17 @@ class FrameSampler implements BaseFrameSampler {
         }
       } catch (e) {
         print('[FrameSampler] Tick error: $e');
+      } finally {
+        _grabInFlight = false;
       }
-    });
+    }
+
+    // Emit the first frame immediately so the UI doesn't look stuck.
+    // (Keeps the same behaviour as RealMockFrameSampler.)
+    unawaited(tick());
+
+    _timer?.cancel();
+    _timer = Timer.periodic(_interval, (_) => tick());
 
     return _controller!.stream;
   }
@@ -384,20 +399,29 @@ class FrameSampler implements BaseFrameSampler {
       return url;
     }
 
-    print('[FrameSampler] Resolving stream URL via yt-dlp...');
+    print('[FrameSampler] Resolving stream URL via yt-*...');
 
-    final result = await Process.run(
-      'yt-dlp',
-      [
-        '-g',                   // print the direct stream URL only
-        '--no-playlist',        // never download a whole playlist
-        '-f', 'best[ext=mp4]',  // prefer mp4; falls back automatically
-        url,
-      ],
-    );
+    // Prefer `yt-plb` if installed (requested by user). Fall back to `yt-dlp`.
+    final candidates = <String>['yt-plb', 'yt-dlp'];
+    ProcessResult? result;
+    for (final exe in candidates) {
+      result = await _runProcessWithTimeout(
+        exe,
+        [
+          '-g', // print the direct stream URL only
+          '--no-playlist',
+          '-f', 'best[ext=mp4]',
+          url,
+        ],
+        timeout: _processTimeout,
+      );
+      if (result.exitCode == 0) {
+        break;
+      }
+    }
 
-    if (result.exitCode != 0) {
-      print('[FrameSampler] yt-dlp failed (exit ${result.exitCode}): ${result.stderr}');
+    if (result == null || result.exitCode != 0) {
+      print('[FrameSampler] yt-* failed (exit ${result?.exitCode}): ${result?.stderr}');
       return null;
     }
 
@@ -417,7 +441,7 @@ class FrameSampler implements BaseFrameSampler {
   // Then calls ffmpeg to extract one PNG frame via pipe.
   // Returns null on any failure — the timer loop skips silently.
   // ─────────────────────────────────────────────────────────
-  Future<Uint8List?> _grabFrame(String url) async {
+  Future<Uint8List?> _grabFrame(String url, {required int vodSeekSeconds}) async {
     // Resolve once, reuse on every subsequent tick.
     _resolvedStreamUrl ??= await _resolveStreamUrl(url);
 
@@ -426,18 +450,54 @@ class FrameSampler implements BaseFrameSampler {
       return null;
     }
 
-    final result = await Process.run(
-      'ffmpeg',
-      [
-        '-y',                   // overwrite output without prompting
-        '-i', _resolvedStreamUrl!,
-        '-vframes', '1',        // grab exactly one frame
-        '-f', 'image2pipe',     // output format: pipe
-        '-vcodec', 'png',       // encode as PNG
-        'pipe:1',               // pipe stdout
-      ],
-      stdoutEncoding: null,     // MUST be null to receive raw bytes
+    final resolved = _resolvedStreamUrl!;
+    final isHls = resolved.contains('.m3u8') || resolved.contains('manifest');
+    final canSeek = vodSeekSeconds > 0;
+
+    List<String> buildArgs({required bool withSeek}) {
+      return <String>[
+        'ffmpeg',
+        '-y',
+        '-nostdin',
+        '-hide_banner',
+        '-loglevel', 'error',
+        // Network reads can block forever on bad connections; this bounds it.
+        '-rw_timeout', '15000000', // 15s (microseconds)
+        // For HLS live playlists, start from the live edge so repeated 1-frame
+        // grabs don't keep returning the same early segment.
+        if (isHls) ...['-live_start_index', '-1'],
+        // Seek forward so we don't keep grabbing t=0.
+        // This also helps for HLS VOD playlists; if unsupported, we retry once
+        // without seeking.
+        if (withSeek) ...['-ss', vodSeekSeconds.toString()],
+        '-i',
+        resolved,
+        '-vframes', '1',
+        '-f', 'image2pipe',
+        '-vcodec', 'png',
+        'pipe:1',
+      ];
+    }
+
+    final args = buildArgs(withSeek: canSeek);
+
+    var result = await _runProcessWithTimeout(
+      args.first,
+      args.sublist(1),
+      stdoutAsBytes: true,
+      timeout: _processTimeout,
     );
+
+    // If seeking fails on a particular URL type, retry once without seek.
+    if (result.exitCode != 0 && canSeek) {
+      final fallbackArgs = buildArgs(withSeek: false);
+      result = await _runProcessWithTimeout(
+        fallbackArgs.first,
+        fallbackArgs.sublist(1),
+        stdoutAsBytes: true,
+        timeout: _processTimeout,
+      );
+    }
 
     if (result.exitCode != 0) {
       print('[FrameSampler] ffmpeg error (exit ${result.exitCode}): ${result.stderr}');
@@ -493,5 +553,96 @@ class FrameSampler implements BaseFrameSampler {
     _timer?.cancel();
     _controller?.close();
     _resolvedStreamUrl = null;
+    _grabInFlight = false;
+  }
+
+  Future<ProcessResult> _runProcessWithTimeout(
+    String executable,
+    List<String> args, {
+    required Duration timeout,
+    bool stdoutAsBytes = false,
+  }) async {
+    try {
+      final process = await Process.start(
+        executable,
+        args,
+        // NOTE: `runInShell: true` helps resolve PATH on Windows, but it can
+        // leave child processes (ffmpeg) running after a timeout.
+        runInShell: true,
+      );
+
+      final stdoutBytes = <int>[];
+      final stdoutText = StringBuffer();
+      final stderrText = StringBuffer();
+
+      StreamSubscription<List<int>>? outSub;
+      StreamSubscription<List<int>>? errSub;
+      bool finished = false;
+      final completer = Completer<ProcessResult>();
+
+      Future<void> finish(int exitCode) async {
+        if (finished) return;
+        finished = true;
+        await outSub?.cancel();
+        await errSub?.cancel();
+        completer.complete(
+          ProcessResult(
+            process.pid,
+            exitCode,
+            stdoutAsBytes ? stdoutBytes : stdoutText.toString(),
+            stderrText.toString(),
+          ),
+        );
+      }
+
+      outSub = process.stdout.listen((chunk) {
+        if (stdoutAsBytes) {
+          stdoutBytes.addAll(chunk);
+        } else {
+          stdoutText.write(systemEncoding.decode(chunk));
+        }
+      });
+
+      errSub = process.stderr.listen((chunk) {
+        stderrText.write(systemEncoding.decode(chunk));
+      });
+
+      final timer = Timer(timeout, () async {
+        // Force kill on timeout. On Windows, kill the full process tree.
+        try {
+          if (Platform.isWindows) {
+            await Process.run(
+              'taskkill',
+              ['/PID', '${process.pid}', '/T', '/F'],
+              runInShell: true,
+            );
+          } else {
+            process.kill(ProcessSignal.sigkill);
+          }
+        } catch (_) {
+          try {
+            process.kill();
+          } catch (_) {
+            // ignore
+          }
+        } finally {
+          // IMPORTANT: Don't wait forever for stdout/stderr to close.
+          unawaited(finish(-1));
+        }
+      });
+
+      process.exitCode.then((code) async {
+        timer.cancel();
+        await finish(code);
+      }).catchError((_) async {
+        timer.cancel();
+        await finish(-1);
+      });
+
+      return completer.future;
+    } catch (e) {
+      // If the executable is missing or fails to start, mimic a ProcessResult.
+      return ProcessResult(0, -1, stdoutAsBytes ? <int>[] : '', e.toString());
+    }
   }
 }

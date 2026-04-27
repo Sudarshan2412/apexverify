@@ -1,7 +1,8 @@
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../services/frame_sampler.dart';
+import '../services/base_frame_sampler.dart';
+import '../services/frame_sampler_factory.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 3: Real FrameSampler is now wired in.
@@ -15,8 +16,7 @@ import '../services/frame_sampler.dart';
 const bool useMock = false; // ← Phase 3: live pipeline active
 
 final frameSamplerProvider = Provider<BaseFrameSampler>((ref) {
-  if (useMock) return RealMockFrameSampler();
-  return FrameSampler();
+  return createFrameSampler(useMock: useMock);
 });
 
 final streamUrlProvider = StateProvider<String>((ref) => '');

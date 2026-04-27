@@ -39,6 +39,13 @@
 - [x] stream_monitor_screen.dart: StatusIndicator turns red on violation, green on null
 - [x] stream_monitor_screen.dart: Wire ComparisonService.alertStream listener → _violations list
 
+### Step 3.4 — Live Frame Sampling + Web Alternative (Phase 3)
+- [x] Fix build break: ensure `.env` exists and is listed as a Flutter asset.
+- [x] Fix “stuck on first frame” by avoiding sampler restarts caused by calling `startSampling()` from widget `build()`.
+- [x] Verify Windows runtime: `flutter run -d windows` produces repeated `[FrameSampler] Frame grabbed ...` logs.
+- [x] Start backend: `npm install` then `node src/server.js`, confirm `GET /health` works.
+- [x] Verify web path: `flutter run -d chrome` compiles and processes frames via `/api/frame`.
+
 ## Workflow Compliance Tasks
 - [ ] Start every non-trivial task by writing a checkable implementation plan in this file.
 - [ ] If work goes sideways, stop and re-plan before continuing implementation.
@@ -80,3 +87,11 @@
 	- `ucl_01.png` -> `RMA vs BAY`, score `2 - 1`, clock `90:00`
 - `flutter run -d windows -t tool/ocr_static_check.dart` -> Cloud Vision escalation now succeeds with HTTP 200 and fullTextAnnotation across all static images; parsed snapshots confirmed for EPL/NBA/UCL samples
 - `flutter analyze` -> 31 info-level issues (avoid_print, deprecated_member_use), 0 errors, 0 warnings in project code. Phase 3 wiring compiles cleanly.
+- `flutter run -d windows` -> previously failed due to missing `.env` asset; fixed by adding local `.env` (gitignored). Windows build now completes and app starts.
+- `flutter run -d windows` -> confirms frame sampling continues (multiple `Frame grabbed` entries, not just first frame).
+- `npm install` (in repo root `fair_scan_ai/`) -> installs backend deps (dotenv/express/etc).
+- `node fair_scan_ai/src/server.js` -> backend starts and serves `GET /health`.
+- `Invoke-RestMethod http://localhost:3001/health` -> `{ "status": "OCR server is running", "port": 3001 }`.
+- `Invoke-WebRequest /api/frame?...` -> saves PNG with signature `89 50 4E 47 0D 0A 1A 0A`.
+- `/api/frame` advancing check -> hashes differ at `t=0/5/10`, confirming frames change over time (not stuck on first).
+- `flutter run -d chrome` -> launches successfully; `[OcrService] Frame processed ...` repeats (web sampler path active).
