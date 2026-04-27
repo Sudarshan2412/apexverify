@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'core/theme/app_theme.dart';
 import 'models/violation_alert.dart';
-import 'services/mock_frame_sampler.dart';
+import 'services/frame_sampler.dart';
 import 'widgets/status_indicator.dart';
 import 'widgets/alert_card.dart';
 import 'widgets/dmca_log.dart';
@@ -20,14 +20,14 @@ class _StreamMonitorScreenState extends State<StreamMonitorScreen> {
   final _urlController = TextEditingController(
     text: 'https://example.com/stream',
   );
-  late MockFrameSampler _frameSampler;
+  late BaseFrameSampler _frameSampler;
   bool _isMonitoring = false;
   final List<ViolationAlert> _violations = [];
 
   @override
   void initState() {
     super.initState();
-    _frameSampler = MockFrameSampler();
+    _frameSampler = RealMockFrameSampler();
   }
 
   @override
@@ -46,12 +46,13 @@ class _StreamMonitorScreenState extends State<StreamMonitorScreen> {
   void _stopMonitoring() {
     setState(() {
       _isMonitoring = false;
-      _frameSampler.stopSampling();
+      _frameSampler.dispose();
+      _frameSampler = RealMockFrameSampler();
     });
   }
 
   Future<void> _saveScreenshot() async {
-    await _frameSampler.saveCurrentFrame();
+    await _frameSampler.saveCurrentFrame('monitor_screenshot.png');
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
