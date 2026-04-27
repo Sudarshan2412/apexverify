@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
-import '../services/mock_frame_sampler.dart';
+import '../services/frame_sampler.dart';
 import '../core/theme/app_theme.dart';
 
 /// Frame preview panel widget
 /// Displays live frames from MockFrameSampler
 class FramePreviewPanel extends StatefulWidget {
   final String url;
-  final MockFrameSampler frameSampler;
+  final BaseFrameSampler frameSampler;
 
   const FramePreviewPanel({
     super.key,
@@ -139,7 +139,7 @@ class _FramePreviewPanelState extends State<FramePreviewPanel> {
 
   @override
   void dispose() {
-    widget.frameSampler.stopSampling();
+    // The parent widget (StreamMonitorScreen) manages disposing the frame sampler.
     super.dispose();
   }
 }
