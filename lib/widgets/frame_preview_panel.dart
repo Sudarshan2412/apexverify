@@ -1,18 +1,15 @@
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
-import '../services/frame_sampler.dart';
 import '../core/theme/app_theme.dart';
 
 /// Frame preview panel widget
 /// Displays live frames from MockFrameSampler
 class FramePreviewPanel extends StatefulWidget {
-  final String url;
-  final BaseFrameSampler frameSampler;
+  final Stream<Uint8List> frameStream;
 
   const FramePreviewPanel({
     super.key,
-    required this.url,
-    required this.frameSampler,
+    required this.frameStream,
   });
 
   @override
@@ -33,7 +30,7 @@ class _FramePreviewPanelState extends State<FramePreviewPanel> {
         ),
       ),
       child: StreamBuilder<Uint8List>(
-        stream: widget.frameSampler.startSampling(widget.url),
+        stream: widget.frameStream,
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return Column(

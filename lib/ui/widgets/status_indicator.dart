@@ -15,7 +15,7 @@ class StatusIndicator extends StatelessWidget {
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         border: Border.all(color: color, width: 1),
         borderRadius: BorderRadius.circular(3),
       ),
@@ -72,7 +72,7 @@ class _PulsingDotState extends State<_PulsingDot> with SingleTickerProviderState
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _anim,
-      builder: (_, __) => Opacity(
+      builder: (context, child) => Opacity(
         opacity: widget.active ? _anim.value : 1.0,
         child: Container(
           width: 7,

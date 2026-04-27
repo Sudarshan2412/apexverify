@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import '../models/match_snapshot.dart';
@@ -11,45 +11,81 @@ class ComparisonService {
   final FirestoreService _firestoreService;
   final String geminiApiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
 
+  // Step 3.2 Member D Step 5: Expose Stream<ViolationAlert?> to Member A
+  // _alertController is broadcast so multiple listeners (dashboard, log) can subscribe.
   final StreamController<ViolationAlert?> _alertController =
       StreamController<ViolationAlert?>.broadcast();
 
+  /// The alert stream Member A subscribes to in the dashboard.
+  /// null = clean frame, non-null = violation detected.
   Stream<ViolationAlert?> get alertStream => _alertController.stream;
 
   ComparisonService(this._firestoreService);
 
+  /// Step 3.2 Member D Step 1: Compare OCR snapshot against Firestore official data.
+  ///
+  /// Called from: `ocrService.snapshotStream.listen((snap) => comparisonService.compare(snap))`
+  ///
+  /// Checks score, clock drift, and overlay. Emits a ViolationAlert on mismatch
+  /// or null on clean frame.
   Future<void> compare(MatchSnapshot ocr) async {
     final official = await _firestoreService.getOfficialData();
 
+    // Step 3.2 Member D Step 2: Debug logging — Firestore vs OCR
+    debugPrint('[ComparisonService] Official from Firestore: ${official['score']} vs OCR: ${ocr.score}');
+    debugPrint('[ComparisonService] Official clock: ${official['clock']} vs OCR clock: ${ocr.clock}');
+
+    // ── Score mismatch ──────────────────────────────────────────────────
     if (ocr.score.isNotEmpty && ocr.score != official['score']) {
-      _alertController.add(await _buildAlert(
+      final alert = await _buildAlert(
         fieldMismatch: 'score',
         expected: official['score'] ?? '',
         actual: ocr.score,
-      ));
+      );
+      _logAlert(alert);
+      _alertController.add(alert);
       return;
     }
 
+    // ── Clock drift ─────────────────────────────────────────────────────
     if (ocr.clock.isNotEmpty &&
         _clockDriftExceedsThreshold(ocr.clock, official['clock'] ?? '')) {
-      _alertController.add(await _buildAlert(
+      final alert = await _buildAlert(
         fieldMismatch: 'clock',
         expected: official['clock'] ?? '',
         actual: ocr.clock,
-      ));
+      );
+      _logAlert(alert);
+      _alertController.add(alert);
       return;
     }
 
+    // ── Overlay detection ───────────────────────────────────────────────
     if (ocr.hasOverlay) {
-      _alertController.add(await _buildAlert(
+      final alert = await _buildAlert(
         fieldMismatch: 'overlay',
         expected: 'no overlay',
         actual: 'unauthorized overlay detected',
-      ));
+      );
+      _logAlert(alert);
+      _alertController.add(alert);
       return;
     }
 
+    // Step 3.2 Member D Step 4: Clean frames produce null alerts
+    debugPrint('[ComparisonService] Clean frame — no violations.');
     _alertController.add(null);
+  }
+
+  /// Step 3.2 Member D Step 3: Log all ViolationAlert fields for debugging.
+  void _logAlert(ViolationAlert alert) {
+    debugPrint('[ComparisonService] ⚠️ VIOLATION DETECTED:');
+    debugPrint('  severity: ${alert.severity}');
+    debugPrint('  fieldMismatch: ${alert.fieldMismatch}');
+    debugPrint('  expected: ${alert.expected}');
+    debugPrint('  actual: ${alert.actual}');
+    debugPrint('  description: ${alert.description}');
+    debugPrint('  timestamp: ${alert.timestamp}');
   }
 
   bool _clockDriftExceedsThreshold(String ocr, String official) {
@@ -127,9 +163,15 @@ In one sentence, describe this as a forensic finding for a DMCA report. Be speci
       );
 
       final json = jsonDecode(response.body);
-      return json['candidates'][0]['content']['parts'][0]['text'] ??
-          'Violation detected.';
-    } catch (_) {
+      final text = json['candidates'][0]['content']['parts'][0]['text'];
+      if (text == null || (text as String).trim().isEmpty) {
+        debugPrint('[ComparisonService] ⚠️ Gemini returned null/empty description!');
+        return 'Violation detected: $fieldMismatch mismatch (expected: $expected, actual: $actual).';
+      }
+      debugPrint('[ComparisonService] Gemini description received: ${text.substring(0, text.length.clamp(0, 80))}...');
+      return text;
+    } catch (e) {
+      debugPrint('[ComparisonService] Gemini API call failed: $e');
       return 'Violation detected: $fieldMismatch mismatch (expected: $expected, actual: $actual).';
     }
   }

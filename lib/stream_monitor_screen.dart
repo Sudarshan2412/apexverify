@@ -1,7 +1,16 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'core/theme/app_theme.dart';
+import 'models/match_snapshot.dart';
 import 'models/violation_alert.dart';
-import 'services/frame_sampler.dart';
+import 'providers/frame_provider.dart' show useMock;
+import 'services/comparison_service.dart';
+import 'services/firestore_service.dart';
+import 'services/base_frame_sampler.dart';
+import 'services/frame_sampler_factory.dart';
+import 'services/ocr_service.dart';
 import 'widgets/status_indicator.dart';
 import 'widgets/alert_card.dart';
 import 'widgets/dmca_log.dart';
@@ -21,34 +30,81 @@ class _StreamMonitorScreenState extends State<StreamMonitorScreen> {
     text: 'https://example.com/stream',
   );
   late BaseFrameSampler _frameSampler;
+  Stream<Uint8List>? _frameStream;
   bool _isMonitoring = false;
   final List<ViolationAlert> _violations = [];
+
+  // ── Live pipeline services (Step 3.1 + 3.2) ──────────────────────────
+  late OcrService _ocrService;
+  late ComparisonService _comparisonService;
+  StreamSubscription<MatchSnapshot>? _snapshotSub;
+  StreamSubscription<ViolationAlert?>? _alertSub;
 
   @override
   void initState() {
     super.initState();
-    _frameSampler = RealMockFrameSampler();
+    _frameSampler = createFrameSampler(useMock: useMock);
+    _ocrService = OcrService(enableDebugLogs: true);
+    _comparisonService = ComparisonService(FirestoreService());
   }
 
   @override
   void dispose() {
+    _stopPipeline();
     _urlController.dispose();
     _frameSampler.dispose();
+    _ocrService.dispose();
+    _comparisonService.dispose();
     super.dispose();
   }
 
   void _startMonitoring() {
+    final url = _urlController.text.trim();
+    if (url.isEmpty) return;
+
+    // Step 3.1 — Start the frame → OCR pipeline
+    final frameStream = _frameSampler.startSampling(url);
+    _frameStream = frameStream;
+    _ocrService.startLivePipeline(frameStream);
+
+    // Step 3.2 — Wire snapshotStream → ComparisonService
+    _snapshotSub = _ocrService.snapshotStream.listen((MatchSnapshot snap) {
+      debugPrint('Score: ${snap.score}');
+      debugPrint('Clock: ${snap.clock}');
+      debugPrint('Overlay: ${snap.hasOverlay}');
+      _comparisonService.compare(snap);
+    });
+
+    // Listen for violation alerts from ComparisonService
+    _alertSub = _comparisonService.alertStream.listen((alert) {
+      if (alert != null && mounted) {
+        setState(() {
+          _violations.add(alert);
+        });
+      }
+    });
+
     setState(() {
       _isMonitoring = true;
     });
   }
 
   void _stopMonitoring() {
+    _stopPipeline();
     setState(() {
       _isMonitoring = false;
+      _frameStream = null;
       _frameSampler.dispose();
-      _frameSampler = RealMockFrameSampler();
+      _frameSampler = createFrameSampler(useMock: useMock);
     });
+  }
+
+  void _stopPipeline() {
+    _snapshotSub?.cancel();
+    _snapshotSub = null;
+    _alertSub?.cancel();
+    _alertSub = null;
+    _ocrService.stopLivePipeline();
   }
 
   Future<void> _saveScreenshot() async {
@@ -226,8 +282,7 @@ class _StreamMonitorScreenState extends State<StreamMonitorScreen> {
                     child: SizedBox(
                       height: 280,
                       child: FramePreviewPanel(
-                        url: _urlController.text,
-                        frameSampler: _frameSampler,
+                          frameStream: _frameStream ?? const Stream<Uint8List>.empty(),
                       ),
                     ),
                   ),
@@ -281,8 +336,7 @@ class _StreamMonitorScreenState extends State<StreamMonitorScreen> {
                         SizedBox(
                           height: 260,
                           child: FramePreviewPanel(
-                            url: _urlController.text,
-                            frameSampler: _frameSampler,
+                            frameStream: _frameStream ?? const Stream<Uint8List>.empty(),
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -327,8 +381,7 @@ class _StreamMonitorScreenState extends State<StreamMonitorScreen> {
               SizedBox(
                 height: 200,
                 child: FramePreviewPanel(
-                  url: _urlController.text,
-                  frameSampler: _frameSampler,
+                  frameStream: _frameStream ?? const Stream<Uint8List>.empty(),
                 ),
               ),
               const SizedBox(height: 12),
