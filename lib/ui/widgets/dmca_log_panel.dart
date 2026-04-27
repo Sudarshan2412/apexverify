@@ -61,7 +61,7 @@ class DmcaLogPanel extends ConsumerWidget {
                 : ListView.separated(
                     padding: const EdgeInsets.symmetric(vertical: 4),
                     itemCount: log.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFF141414)),
+                    separatorBuilder: (context, index) => const Divider(height: 1, color: Color(0xFF141414)),
                     itemBuilder: (_, i) => _LogEntry(alert: log[i], index: i),
                   ),
           ),

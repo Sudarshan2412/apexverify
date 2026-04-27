@@ -1,8 +1,9 @@
 # Task Tracker
 
 ## Phase Status
-- Current phase: Part 1 completed (static image validation and regex tuning)
+- Current phase: Phase 3 integration complete (Step 3.1 + Step 3.2 wired)
 - Completed milestone: OCR service + parser + static image verification (4/4)
+- Completed milestone: Live pipeline wiring (Step 3.1 + Step 3.2)
 
 ## Active Plan
 - [x] Add `MatchSnapshot` model in `lib/models/match_snapshot.dart`.
@@ -10,6 +11,33 @@
 - [x] Add environment key loading for Cloud Vision API and document setup.
 - [x] Add parser-focused tests for score/clock/overlay extraction.
 - [x] Run verification (`flutter analyze` and relevant tests).
+
+## Phase 3 Integration Tasks
+
+### Step 3.1 — Connect Frame Pipeline to OCR Engine (Member B + Member C)
+- [x] FrameSampler class uncommented and compiles (`lib/services/frame_sampler.dart`)
+- [x] RealMockFrameSampler class uncommented and compiles
+- [x] BaseFrameSampler abstract interface active
+- [x] frame_provider.dart: Replace stub classes with real imports from frame_sampler.dart
+- [x] frame_provider.dart: Set `useMock = false` for Phase 3 live pipeline
+- [x] ocr_provider.dart: Create provider wiring FrameSampler → OcrService.startLivePipeline → snapshotStream
+- [x] stream_monitor_screen.dart: Wire _startMonitoring() to start live pipeline with frame → OCR → snapshot flow
+- [x] stream_monitor_screen.dart: Add snapshotStream listener that prints Score/Clock/Overlay to console
+- [x] OcrService.snapshotStream exposed as broadcast StreamController (already done)
+
+### Step 3.2 — Connect OCR Output to Comparison Engine (Member C + Member D)
+- [x] alert_provider.dart: Replace _stubAlertStream() with real ComparisonService.alertStream
+- [x] alert_provider.dart: Create firestoreServiceProvider, comparisonServiceProvider
+- [x] alert_provider.dart: Wire snapshotStream → ComparisonService.compare(snap) → alertStream
+- [x] comparison_service.dart: Add debug logging for official vs OCR values
+- [x] comparison_service.dart: Print ViolationAlert fields when Firestore mismatch occurs
+- [x] comparison_service.dart: Expose Stream<ViolationAlert?> to Member A via broadcast controller
+
+### Step 3.3 — Wire Alert Stream to Dashboard (Member D + Member A)
+- [x] alert_provider.dart: Expose alertStreamProvider (Stream<ViolationAlert?>)
+- [x] ui/stream_monitor_screen.dart: Confirm Member A can import and subscribe to alertStream without compile errors (`ref.watch(alertStreamProvider)`)
+- [x] stream_monitor_screen.dart: StatusIndicator turns red on violation, green on null
+- [x] stream_monitor_screen.dart: Wire ComparisonService.alertStream listener → _violations list
 
 ## Workflow Compliance Tasks
 - [ ] Start every non-trivial task by writing a checkable implementation plan in this file.
@@ -51,3 +79,4 @@
 	- `nba_01.png` -> `GS vs CLE`, score `64 - 85`, clock `49.8`
 	- `ucl_01.png` -> `RMA vs BAY`, score `2 - 1`, clock `90:00`
 - `flutter run -d windows -t tool/ocr_static_check.dart` -> Cloud Vision escalation now succeeds with HTTP 200 and fullTextAnnotation across all static images; parsed snapshots confirmed for EPL/NBA/UCL samples
+- `flutter analyze` -> 31 info-level issues (avoid_print, deprecated_member_use), 0 errors, 0 warnings in project code. Phase 3 wiring compiles cleanly.
