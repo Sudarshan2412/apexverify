@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/theme/app_theme.dart';
 import 'firebase_options.dart';
 import 'login_page.dart';
-import 'stream_monitor_screen.dart';
+import 'ui/stream_monitor_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,7 +28,7 @@ Future<void> main() async {
     debugPrint('[App] Firebase init error: $e');
   }
 
-  runApp(const RightsGuardApp());
+  runApp(const ProviderScope(child: RightsGuardApp()));
 }
 
 class RightsGuardApp extends StatelessWidget {
