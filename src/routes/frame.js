@@ -1,5 +1,6 @@
 const express = require('express');
 const { spawn } = require('child_process');
+const fs = require('fs');
 
 const router = express.Router();
 
@@ -48,6 +49,17 @@ function _looksLikeYouTubeRateLimit(stderr) {
     s.includes("Sign in to confirm you're not a bot") ||
     s.includes('not a bot')
   );
+}
+
+function _getYtDlpCookiesPath() {
+  // Render Secret Files are typically mounted under /etc/secrets.
+  const envPath = (process.env.YTDLP_COOKIES_PATH || '').trim();
+  if (envPath && fs.existsSync(envPath)) return envPath;
+
+  const defaultPath = '/etc/secrets/yt-dlp-cookies.txt';
+  if (fs.existsSync(defaultPath)) return defaultPath;
+
+  return null;
 }
 
 function _runWithTimeout(command, args, { timeoutMs = 15000, binaryStdout = false } = {}) {
@@ -147,6 +159,7 @@ async function _resolveStreamUrl(inputUrl) {
   const candidates = ['yt-dlp'];
 
   for (const exe of candidates) {
+    const cookiesPath = _getYtDlpCookiesPath();
     const res = await _runWithTimeout(
       exe,
       [
@@ -161,6 +174,7 @@ async function _resolveStreamUrl(inputUrl) {
         '--no-progress',
         '--extractor-args',
         'youtube:player_client=android',
+        ...(cookiesPath ? ['--cookies', cookiesPath] : []),
         // Prefer MP4 when available, but fall back to whatever the extractor
         // can provide for this URL.
         '-f',
@@ -200,6 +214,7 @@ async function _resolveStreamUrlWithDebug(inputUrl) {
   let lastTimedOut = false;
 
   for (const exe of candidates) {
+    const cookiesPath = _getYtDlpCookiesPath();
     const res = await _runWithTimeout(
       exe,
       [
@@ -214,6 +229,7 @@ async function _resolveStreamUrlWithDebug(inputUrl) {
         '--no-progress',
         '--extractor-args',
         'youtube:player_client=android',
+        ...(cookiesPath ? ['--cookies', cookiesPath] : []),
         '-f',
         'best[ext=mp4]/best',
         inputUrl,
