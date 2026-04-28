@@ -22,6 +22,7 @@ class WebFrameSampler implements BaseFrameSampler {
   Uint8List? _lastFrame;
   bool _inFlight = false;
   int _vodSeekSeconds = 0;
+  DateTime? _backoffUntil;
 
   static const String _frameServerUrlEnv = String.fromEnvironment(
     'FRAME_SERVER_URL',
@@ -35,6 +36,9 @@ class WebFrameSampler implements BaseFrameSampler {
     _vodSeekSeconds = 0;
 
     Future<void> tick() async {
+      if (_backoffUntil != null && DateTime.now().isBefore(_backoffUntil!)) {
+        return;
+      }
       if (_inFlight) return;
       _inFlight = true;
       try {
@@ -76,6 +80,13 @@ class WebFrameSampler implements BaseFrameSampler {
           });
 
     final resp = await http.get(uri).timeout(const Duration(seconds: 45));
+    if (resp.statusCode == 429) {
+      // Back off to avoid hammering the backend/YouTube and wasting free-tier minutes.
+      _backoffUntil = DateTime.now().add(const Duration(minutes: 10));
+      final body = (resp.bodyBytes.isNotEmpty ? resp.body : '').trim();
+      debugPrint('[WebFrameSampler] Rate-limited (429). Backing off 10 minutes. ${body.isEmpty ? '' : body}');
+      return null;
+    }
     if (resp.statusCode != 200) {
       debugPrint('[WebFrameSampler] Server error ${resp.statusCode}: ${resp.body}');
       return null;

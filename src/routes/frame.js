@@ -5,6 +5,8 @@ const router = express.Router();
 
 const RESOLVE_TTL_MS = 5 * 60 * 1000;
 const _resolvedCache = new Map();
+const NEGATIVE_TTL_MS = 10 * 60 * 1000;
+const _negativeCache = new Map();
 
 function _isDirectStreamUrl(url) {
   return url.includes('.m3u8') || url.includes('.ts') || url.includes('manifest');
@@ -22,6 +24,30 @@ function _cacheGet(url) {
 
 function _cacheSet(url, value) {
   _resolvedCache.set(url, { value, expiresAt: Date.now() + RESOLVE_TTL_MS });
+}
+
+function _negativeGet(url) {
+  const entry = _negativeCache.get(url);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    _negativeCache.delete(url);
+    return null;
+  }
+  return entry;
+}
+
+function _negativeSet(url, reason) {
+  _negativeCache.set(url, { reason, expiresAt: Date.now() + NEGATIVE_TTL_MS });
+}
+
+function _looksLikeYouTubeRateLimit(stderr) {
+  const s = String(stderr || '');
+  return (
+    s.includes('HTTP Error 429') ||
+    s.includes('Too Many Requests') ||
+    s.includes("Sign in to confirm you're not a bot") ||
+    s.includes('not a bot')
+  );
 }
 
 function _runWithTimeout(command, args, { timeoutMs = 15000, binaryStdout = false } = {}) {
@@ -166,6 +192,9 @@ async function _resolveStreamUrlWithDebug(inputUrl) {
   const cached = _cacheGet(inputUrl);
   if (cached) return { streamUrl: cached, debug: null };
 
+  const neg = _negativeGet(inputUrl);
+  if (neg) return { streamUrl: null, debug: neg.reason || 'Temporarily blocked' };
+
   const candidates = ['yt-dlp'];
   let lastStderr = '';
   let lastTimedOut = false;
@@ -206,6 +235,12 @@ async function _resolveStreamUrlWithDebug(inputUrl) {
         return { streamUrl: resolved, debug: null };
       }
     }
+
+    if (_looksLikeYouTubeRateLimit(res.stderr)) {
+      const clipped = String(res.stderr || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+      _negativeSet(inputUrl, clipped || 'YouTube rate-limited this server (HTTP 429)');
+      return { streamUrl: null, debug: clipped || 'YouTube rate-limited this server (HTTP 429)' };
+    }
   }
 
   const debug = lastStderr
@@ -228,6 +263,15 @@ router.get('/frame', async (req, res) => {
   try {
     const { streamUrl, debug } = await _resolveStreamUrlWithDebug(url);
     if (!streamUrl) {
+      if (_looksLikeYouTubeRateLimit(debug)) {
+        return res
+          .status(429)
+          .send(
+            `YouTube blocked this server (HTTP 429 / bot check). ` +
+              `Try a direct .mp4/.m3u8 URL, reduce polling, or provide yt-dlp cookies. Details: ${debug}`,
+          );
+      }
+
       const suffix = debug ? ` Details: ${debug}` : '';
       return res.status(502).send(`Failed to resolve stream URL (yt-plb/yt-dlp).${suffix}`);
     }
