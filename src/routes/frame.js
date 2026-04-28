@@ -127,6 +127,11 @@ async function _resolveStreamUrl(inputUrl) {
         '--no-playlist',
         '--no-check-certificate',
         '--geo-bypass',
+        '--socket-timeout', '10',
+        '--retries', '1',
+        '--fragment-retries', '1',
+        '--extractor-retries', '1',
+        '--no-progress',
         // Prefer MP4 when available, but fall back to whatever the extractor
         // can provide for this URL.
         '-f',
@@ -169,6 +174,11 @@ async function _resolveStreamUrlWithDebug(inputUrl) {
         '--no-playlist',
         '--no-check-certificate',
         '--geo-bypass',
+        '--socket-timeout', '10',
+        '--retries', '1',
+        '--fragment-retries', '1',
+        '--extractor-retries', '1',
+        '--no-progress',
         '-f',
         'best[ext=mp4]/best',
         inputUrl,
