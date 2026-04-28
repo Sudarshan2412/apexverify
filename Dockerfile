@@ -5,12 +5,13 @@ ENV NODE_ENV=production
 # Native deps:
 # - ffmpeg: frame grabbing
 # - poppler-utils: PDF -> images for pdf-poppler
-# - yt-dlp: resolve YouTube/VOD URLs
+# - python3 + yt-dlp: resolve YouTube/VOD URLs
 RUN set -eux; \
   apt-get update; \
   apt-get install -y --no-install-recommends \
     ffmpeg \
     poppler-utils \
+    python3 \
     ca-certificates \
     curl; \
   rm -rf /var/lib/apt/lists/*; \
