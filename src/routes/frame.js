@@ -116,8 +116,9 @@ async function _resolveStreamUrl(inputUrl) {
   const cached = _cacheGet(inputUrl);
   if (cached) return cached;
 
-  // Prefer `yt-plb` if installed (requested). Fall back to `yt-dlp`.
-  const candidates = ['yt-plb', 'yt-dlp'];
+  // Use yt-dlp only. In our container `yt-plb` is a symlink to `yt-dlp`, and
+  // running both would just double latency.
+  const candidates = ['yt-dlp'];
 
   for (const exe of candidates) {
     const res = await _runWithTimeout(
@@ -132,13 +133,15 @@ async function _resolveStreamUrl(inputUrl) {
         '--fragment-retries', '1',
         '--extractor-retries', '1',
         '--no-progress',
+        '--extractor-args',
+        'youtube:player_client=android',
         // Prefer MP4 when available, but fall back to whatever the extractor
         // can provide for this URL.
         '-f',
         'best[ext=mp4]/best',
         inputUrl,
       ],
-      { timeoutMs: 30000, binaryStdout: false },
+      { timeoutMs: 25000, binaryStdout: false },
     );
 
     if (res.code === 0) {
@@ -163,8 +166,9 @@ async function _resolveStreamUrlWithDebug(inputUrl) {
   const cached = _cacheGet(inputUrl);
   if (cached) return { streamUrl: cached, debug: null };
 
-  const candidates = ['yt-plb', 'yt-dlp'];
+  const candidates = ['yt-dlp'];
   let lastStderr = '';
+  let lastTimedOut = false;
 
   for (const exe of candidates) {
     const res = await _runWithTimeout(
@@ -179,13 +183,16 @@ async function _resolveStreamUrlWithDebug(inputUrl) {
         '--fragment-retries', '1',
         '--extractor-retries', '1',
         '--no-progress',
+        '--extractor-args',
+        'youtube:player_client=android',
         '-f',
         'best[ext=mp4]/best',
         inputUrl,
       ],
-      { timeoutMs: 30000, binaryStdout: false },
+      { timeoutMs: 25000, binaryStdout: false },
     );
 
+    lastTimedOut = lastTimedOut || Boolean(res.timedOut);
     lastStderr = res.stderr || lastStderr;
 
     if (res.code === 0) {
@@ -202,11 +209,10 @@ async function _resolveStreamUrlWithDebug(inputUrl) {
   }
 
   const debug = lastStderr
-    ? String(lastStderr)
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 500)
-    : null;
+    ? String(lastStderr).replace(/\s+/g, ' ').trim().slice(0, 500)
+    : lastTimedOut
+        ? 'yt-dlp timed out'
+        : null;
   return { streamUrl: null, debug };
 }
 
