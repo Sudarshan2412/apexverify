@@ -1,5 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:file_picker/file_picker.dart';
@@ -33,7 +34,17 @@ class _AnalysisViewState extends State<AnalysisView> {
   String _errorMessage = '';
   bool _ocrComplete = false;
 
-  static const String _backendUrl = 'http://localhost:3001/api/upload';
+  static const String _ocrServerUrlEnv = String.fromEnvironment(
+    'OCR_SERVER_URL',
+    defaultValue: '',
+  );
+
+  static String get _backendUrl {
+    final base = _ocrServerUrlEnv.isNotEmpty
+        ? _ocrServerUrlEnv
+        : (kDebugMode ? 'http://localhost:3001' : '');
+    return base.isEmpty ? '/api/upload' : '$base/api/upload';
+  }
 
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
@@ -107,10 +118,15 @@ class _AnalysisViewState extends State<AnalysisView> {
           _errorMessage = 'Server error: ${response.statusCode}';
         });
       }
-    } on SocketException {
+    } on TimeoutException {
       setState(() {
         _isScanning = false;
-        _errorMessage = 'Cannot reach OCR server. Is it running on port 3001?';
+        _errorMessage = 'Request timed out while contacting OCR server.';
+      });
+    } on http.ClientException {
+      setState(() {
+        _isScanning = false;
+        _errorMessage = 'Network error while contacting OCR server.';
       });
     } catch (e) {
       setState(() {

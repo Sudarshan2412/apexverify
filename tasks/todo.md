@@ -12,6 +12,21 @@
 - [x] Add parser-focused tests for score/clock/overlay extraction.
 - [x] Run verification (`flutter analyze` and relevant tests).
 
+## Deploy Flutter Web to Vercel
+- [ ] Decide deploy mode: prebuilt upload vs Vercel builds
+- [ ] Build web bundle: `flutter build web --release`
+- [ ] Ensure SPA routing rewrite works (Vercel rewrite to `/index.html`)
+- [ ] Deploy `build/web` to Vercel (CLI or Git import)
+- [ ] Verify production URL loads + deep links work
+- [ ] Confirm no secrets are shipped to the browser (do not bundle API keys)
+
+## Deploy Backend (public)
+- [ ] Add Docker deploy files (ffmpeg + poppler + yt-dlp)
+- [ ] Deploy backend to Render (Docker) and get public URL
+- [ ] Set `CORS_ORIGIN` to Vercel domain
+- [ ] Verify `GET /health` and `GET /api/frame?...` work
+- [ ] Rebuild Flutter web with `--dart-define=FRAME_SERVER_URL=...` and redeploy
+
 ## Phase 3 Integration Tasks
 
 ### Step 3.1 — Connect Frame Pipeline to OCR Engine (Member B + Member C)

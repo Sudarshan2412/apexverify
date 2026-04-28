@@ -23,9 +23,9 @@ class WebFrameSampler implements BaseFrameSampler {
   bool _inFlight = false;
   int _vodSeekSeconds = 0;
 
-  static const String _defaultServerUrl = String.fromEnvironment(
+  static const String _frameServerUrlEnv = String.fromEnvironment(
     'FRAME_SERVER_URL',
-    defaultValue: 'http://localhost:3001',
+    defaultValue: '',
   );
 
   @override
@@ -59,13 +59,21 @@ class WebFrameSampler implements BaseFrameSampler {
   }
 
   Future<Uint8List?> _fetchFrame(String url, {required int vodSeekSeconds}) async {
-    final uri = Uri.parse('$_defaultServerUrl/api/frame')
-        .replace(queryParameters: {
-          'url': url,
-          // Used by backend for VOD/direct sources so polling doesn't return
-          // the exact same first frame forever.
-          't': vodSeekSeconds.toString(),
-        });
+    final base = _frameServerUrlEnv.isNotEmpty
+        ? _frameServerUrlEnv
+        : (kDebugMode ? 'http://localhost:3001' : '');
+
+    final uri = base.isEmpty
+        ? Uri(path: '/api/frame', queryParameters: {
+            'url': url,
+            // Used by backend for VOD/direct sources so polling doesn't return
+            // the exact same first frame forever.
+            't': vodSeekSeconds.toString(),
+          })
+        : Uri.parse('$base/api/frame').replace(queryParameters: {
+            'url': url,
+            't': vodSeekSeconds.toString(),
+          });
 
     final resp = await http.get(uri).timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) {
