@@ -21,6 +21,19 @@ app.use(
   }),
 );
 app.use(express.json());
+
+app.get('/', (req, res) => {
+  res.status(200).json({
+    name: 'apexverify-backend',
+    status: 'ok',
+    endpoints: {
+      health: '/health',
+      upload: '/api/upload',
+      frame: '/api/frame?url=<videoUrl>&t=<seconds>',
+    },
+  });
+});
+
 app.use('/api', uploadRoute);
 app.use('/api', frameRoute);
 
