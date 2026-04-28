@@ -75,7 +75,7 @@ class WebFrameSampler implements BaseFrameSampler {
             't': vodSeekSeconds.toString(),
           });
 
-    final resp = await http.get(uri).timeout(const Duration(seconds: 15));
+    final resp = await http.get(uri).timeout(const Duration(seconds: 45));
     if (resp.statusCode != 200) {
       debugPrint('[WebFrameSampler] Server error ${resp.statusCode}: ${resp.body}');
       return null;

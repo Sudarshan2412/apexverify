@@ -29,10 +29,21 @@ function _runWithTimeout(command, args, { timeoutMs = 15000, binaryStdout = fals
     let stdout = binaryStdout ? [] : '';
     let stderr = '';
     let timedOut = false;
+    let finished = false;
+
+    function finish(result) {
+      if (finished) return;
+      finished = true;
+      resolve(result);
+    }
 
     const child = spawn(command, args, {
-      shell: true,
+      // Avoid spawning a shell; it complicates termination and can cause hangs
+      // when the shell doesn't forward signals to grandchildren.
+      shell: false,
       windowsHide: true,
+      // On Unix, run in a new process group so we can SIGKILL the whole tree.
+      detached: process.platform !== 'win32',
     });
 
     async function killTree() {
@@ -44,7 +55,12 @@ function _runWithTimeout(command, args, { timeoutMs = 15000, binaryStdout = fals
             windowsHide: true,
           });
         } else {
-          child.kill('SIGKILL');
+          // Kill the whole process group.
+          try {
+            process.kill(-child.pid, 'SIGKILL');
+          } catch (_) {
+            child.kill('SIGKILL');
+          }
         }
       } catch (_) {
         try {
@@ -58,6 +74,13 @@ function _runWithTimeout(command, args, { timeoutMs = 15000, binaryStdout = fals
     const timer = setTimeout(() => {
       timedOut = true;
       killTree();
+      // Ensure we return even if the child never emits 'close'.
+      finish({
+        code: -1,
+        stdout: binaryStdout ? Buffer.concat(stdout) : stdout,
+        stderr,
+        timedOut: true,
+      });
     }, timeoutMs);
 
     if (binaryStdout) {
@@ -72,7 +95,7 @@ function _runWithTimeout(command, args, { timeoutMs = 15000, binaryStdout = fals
 
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({
+      finish({
         code: typeof code === 'number' ? code : -1,
         stdout: binaryStdout ? Buffer.concat(stdout) : stdout,
         stderr,
@@ -82,7 +105,7 @@ function _runWithTimeout(command, args, { timeoutMs = 15000, binaryStdout = fals
 
     child.on('error', (err) => {
       clearTimeout(timer);
-      resolve({ code: -1, stdout: binaryStdout ? Buffer.alloc(0) : '', stderr: String(err), timedOut });
+      finish({ code: -1, stdout: binaryStdout ? Buffer.alloc(0) : '', stderr: String(err), timedOut });
     });
   });
 }
