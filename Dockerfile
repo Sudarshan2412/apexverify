@@ -5,18 +5,18 @@ ENV NODE_ENV=production
 # Native deps:
 # - ffmpeg: frame grabbing
 # - poppler-utils: PDF -> images for pdf-poppler
-# - python3/pip: install yt-dlp
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
+# - yt-dlp: resolve YouTube/VOD URLs
+RUN set -eux; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends \
     ffmpeg \
     poppler-utils \
-    python3 \
-    python3-pip \
     ca-certificates \
-  && pip3 install --no-cache-dir yt-dlp \
-  && ln -sf "$(command -v yt-dlp)" /usr/local/bin/yt-plb \
-  && apt-get clean \
-  && rm -rf /var/lib/apt/lists/*
+    curl; \
+  rm -rf /var/lib/apt/lists/*; \
+  curl -L "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" -o /usr/local/bin/yt-dlp; \
+  chmod 0755 /usr/local/bin/yt-dlp; \
+  ln -sf /usr/local/bin/yt-dlp /usr/local/bin/yt-plb
 
 WORKDIR /app
 
