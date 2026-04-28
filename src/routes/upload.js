@@ -2,9 +2,9 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const { preprocessImage } = require('../preprocess');
 const { extractTextFromImage } = require('../ocr');
-const pdf = require('pdf-poppler');
 
 const router = express.Router();
 
@@ -36,29 +36,74 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 } // 20MB for PDFs
 });
 
+function runWithTimeout(command, args, { timeoutMs = 120000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let stderr = '';
+    let timedOut = false;
+
+    const child = spawn(command, args, {
+      shell: true,
+      windowsHide: true,
+    });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        child.kill('SIGKILL');
+      } catch (_) {
+        // ignore
+      }
+    }, timeoutMs);
+
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) return reject(new Error(`${command} timed out`));
+      if (code !== 0) return reject(new Error(stderr || `${command} failed (exit ${code})`));
+      return resolve();
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+async function convertPdfToJpegs(pdfPath, outputDir, baseName) {
+  // Uses `pdftoppm` from poppler-utils (Linux-friendly).
+  // Outputs: <baseName>-1.jpg, <baseName>-2.jpg, ... in outputDir.
+  const prefix = path.join(outputDir, baseName);
+
+  await runWithTimeout('pdftoppm', ['-jpeg', '-r', '150', pdfPath, prefix], {
+    timeoutMs: 180000,
+  });
+
+  const pageFiles = fs
+    .readdirSync(outputDir)
+    .filter((f) => f.startsWith(`${baseName}-`) && f.endsWith('.jpg'))
+    .sort((a, b) => {
+      const an = Number((a.match(/-(\d+)\.jpg$/) || [])[1] || 0);
+      const bn = Number((b.match(/-(\d+)\.jpg$/) || [])[1] || 0);
+      return an - bn;
+    })
+    .map((f) => path.join(outputDir, f));
+
+  if (pageFiles.length === 0) {
+    throw new Error('PDF conversion produced no images. Ensure poppler-utils is installed.');
+  }
+
+  return pageFiles;
+}
+
 // Converts each PDF page to image, OCRs each, stitches results
 async function extractTextFromPDF(pdfPath) {
   const outputDir = path.dirname(pdfPath);
   const baseName = path.basename(pdfPath, path.extname(pdfPath));
 
-  const opts = {
-    format: 'jpeg',
-    out_dir: outputDir,
-    out_prefix: baseName,
-    page: null // all pages
-  };
-
-  await pdf.convert(pdfPath, opts);
-
-  // Find all generated page images, sorted by page number
-  const pageFiles = fs.readdirSync(outputDir)
-    .filter(f => f.startsWith(baseName) && f.endsWith('.jpg'))
-    .sort()
-    .map(f => path.join(outputDir, f));
-
-  if (pageFiles.length === 0) {
-    throw new Error('PDF conversion produced no images. Check Poppler installation.');
-  }
+  const pageFiles = await convertPdfToJpegs(pdfPath, outputDir, baseName);
 
   let allText = '';
   const allBlocks = [];
