@@ -59,9 +59,9 @@ class WebFrameSampler implements BaseFrameSampler {
   }
 
   Future<Uint8List?> _fetchFrame(String url, {required int vodSeekSeconds}) async {
-    final base = _frameServerUrlEnv.isNotEmpty
-        ? _frameServerUrlEnv
-        : (kDebugMode ? 'http://localhost:3001' : '');
+    // Do not default to localhost. If a base URL isn't provided via
+    // `--dart-define=FRAME_SERVER_URL=...`, use same-origin `/api/*`.
+    final base = _frameServerUrlEnv;
 
     final uri = base.isEmpty
         ? Uri(path: '/api/frame', queryParameters: {

@@ -22,3 +22,4 @@
 - Keep all file operations strictly inside workspace project folders (root and `fair_scan_ai`); treat VS Code chat session artifacts under AppData as read-only diagnostics, never as project files.
 - Never call frame sampling start/stop from widget `build()`; it will restart timers on rebuilds and can look like “stuck on first frame”. Start sampling in init/state and expose a shared/broadcast stream.
 - For Flutter Web, keep `dart:io` out of the reachable import graph; use conditional imports/factories to select an IO sampler vs a web-safe sampler.
+- When debugging production “still calling localhost”, first confirm the user is on the latest Vercel alias (deployment URLs are immutable) and verify whether a service worker actually exists before blaming SW caching.

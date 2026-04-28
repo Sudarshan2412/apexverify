@@ -99,12 +99,26 @@ async function _resolveStreamUrl(inputUrl) {
   for (const exe of candidates) {
     const res = await _runWithTimeout(
       exe,
-      ['-g', '--no-playlist', '-f', 'best[ext=mp4]', inputUrl],
-      { timeoutMs: 15000, binaryStdout: false },
+      [
+        '-g',
+        '--no-playlist',
+        '--no-check-certificate',
+        '--geo-bypass',
+        // Prefer MP4 when available, but fall back to whatever the extractor
+        // can provide for this URL.
+        '-f',
+        'best[ext=mp4]/best',
+        inputUrl,
+      ],
+      { timeoutMs: 30000, binaryStdout: false },
     );
 
     if (res.code === 0) {
-      const resolved = String(res.stdout || '').trim();
+      const resolvedLines = String(res.stdout || '')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const resolved = resolvedLines[0];
       if (resolved) {
         _cacheSet(inputUrl, resolved);
         return resolved;
@@ -113,6 +127,54 @@ async function _resolveStreamUrl(inputUrl) {
   }
 
   return null;
+}
+
+async function _resolveStreamUrlWithDebug(inputUrl) {
+  if (_isDirectStreamUrl(inputUrl)) return { streamUrl: inputUrl, debug: null };
+
+  const cached = _cacheGet(inputUrl);
+  if (cached) return { streamUrl: cached, debug: null };
+
+  const candidates = ['yt-plb', 'yt-dlp'];
+  let lastStderr = '';
+
+  for (const exe of candidates) {
+    const res = await _runWithTimeout(
+      exe,
+      [
+        '-g',
+        '--no-playlist',
+        '--no-check-certificate',
+        '--geo-bypass',
+        '-f',
+        'best[ext=mp4]/best',
+        inputUrl,
+      ],
+      { timeoutMs: 30000, binaryStdout: false },
+    );
+
+    lastStderr = res.stderr || lastStderr;
+
+    if (res.code === 0) {
+      const resolvedLines = String(res.stdout || '')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const resolved = resolvedLines[0];
+      if (resolved) {
+        _cacheSet(inputUrl, resolved);
+        return { streamUrl: resolved, debug: null };
+      }
+    }
+  }
+
+  const debug = lastStderr
+    ? String(lastStderr)
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 500)
+    : null;
+  return { streamUrl: null, debug };
 }
 
 router.get('/frame', async (req, res) => {
@@ -125,9 +187,10 @@ router.get('/frame', async (req, res) => {
   const t = Number.isFinite(Number(tRaw)) ? Math.max(0, Math.floor(Number(tRaw))) : 0;
 
   try {
-    const streamUrl = await _resolveStreamUrl(url);
+    const { streamUrl, debug } = await _resolveStreamUrlWithDebug(url);
     if (!streamUrl) {
-      return res.status(502).send('Failed to resolve stream URL (yt-plb/yt-dlp).');
+      const suffix = debug ? ` Details: ${debug}` : '';
+      return res.status(502).send(`Failed to resolve stream URL (yt-plb/yt-dlp).${suffix}`);
     }
 
     const isHls = streamUrl.includes('.m3u8') || streamUrl.includes('manifest');

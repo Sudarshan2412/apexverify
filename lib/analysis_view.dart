@@ -40,9 +40,9 @@ class _AnalysisViewState extends State<AnalysisView> {
   );
 
   static String get _backendUrl {
-    final base = _ocrServerUrlEnv.isNotEmpty
-        ? _ocrServerUrlEnv
-        : (kDebugMode ? 'http://localhost:3001' : '');
+    // Do not default to localhost. If a base URL isn't provided via
+    // `--dart-define=OCR_SERVER_URL=...`, use same-origin `/api/*`.
+    final base = _ocrServerUrlEnv;
     return base.isEmpty ? '/api/upload' : '$base/api/upload';
   }
 

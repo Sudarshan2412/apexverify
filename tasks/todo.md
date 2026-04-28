@@ -13,19 +13,21 @@
 - [x] Run verification (`flutter analyze` and relevant tests).
 
 ## Deploy Flutter Web to Vercel
-- [ ] Decide deploy mode: prebuilt upload vs Vercel builds
-- [ ] Build web bundle: `flutter build web --release`
-- [ ] Ensure SPA routing rewrite works (Vercel rewrite to `/index.html`)
-- [ ] Deploy `build/web` to Vercel (CLI or Git import)
+- [x] Decide deploy mode: prebuilt upload (deploy `build/web`)
+- [x] Build web bundle: `flutter build web --release`
+- [x] Ensure SPA routing rewrite works (Vercel rewrite to `/index.html`)
+- [x] Add Vercel proxy rewrite for `/api/*` → Render backend
+- [x] Deploy `build/web` to Vercel (CLI)
 - [ ] Verify production URL loads + deep links work
-- [ ] Confirm no secrets are shipped to the browser (do not bundle API keys)
+- [x] Confirm no secrets are shipped to the browser (do not bundle API keys)
 
 ## Deploy Backend (public)
-- [ ] Add Docker deploy files (ffmpeg + poppler + yt-dlp)
-- [ ] Deploy backend to Render (Docker) and get public URL
-- [ ] Set `CORS_ORIGIN` to Vercel domain
-- [ ] Verify `GET /health` and `GET /api/frame?...` work
-- [ ] Rebuild Flutter web with `--dart-define=FRAME_SERVER_URL=...` and redeploy
+- [x] Add Docker deploy files (ffmpeg + poppler + yt-dlp)
+- [x] Deploy backend to Render (Docker) and get public URL
+- [ ] Set `CORS_ORIGIN` to Vercel domain (optional if using Vercel same-origin `/api` proxy)
+- [ ] Redeploy Render backend with latest `yt-dlp` resolver hardening
+- [ ] Verify `GET /health` and `GET /api/frame?url=<youtubeUrl>&t=...` work (expect PNG 200)
+- [x] Rebuild Flutter web (defaults to same-origin `/api/*`) and redeploy
 
 ## Phase 3 Integration Tasks
 
