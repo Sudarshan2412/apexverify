@@ -1,0 +1,13 @@
+**/.dart_tool
+**/build
+**/ios
+**/android
+**/linux
+**/macos
+**/windows
+**/.idea
+**/.vscode
+**/node_modules
+**/uploads
+**/*.log
+**/.env

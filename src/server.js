@@ -1,13 +1,25 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 const uploadRoute = require('./routes/upload');
 const frameRoute = require('./routes/frame');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+const CORS_ORIGIN = (process.env.CORS_ORIGIN || '').trim();
+
+// Ensure required runtime directories exist (multer writes to uploads/).
+fs.mkdirSync(path.join(process.cwd(), 'uploads'), { recursive: true });
+
+app.use(
+  cors({
+    origin: CORS_ORIGIN || true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+  }),
+);
 app.use(express.json());
 app.use('/api', uploadRoute);
 app.use('/api', frameRoute);
